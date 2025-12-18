@@ -1,0 +1,44 @@
+AI Shape → Editable Symbol Converter
+
+Project Description:
+This project converts any uploaded shape image into a clean, reusable, and editable symbol using AI-based image processing. 
+Unlike simple vector tracing, the system abstracts the shape by removing noise and simplifying contours, producing a true symbol representation.
+
+Key Features:
+1. Upload any shape image (freeform or industrial).
+2. Automatically preprocess and extract the main shape.
+3. Simplify contours to remove scribbles and unnecessary details.
+4. Convert the shape into a clean symbol outline.
+5. Allow user editing:
+   - Symbol size (scale)
+   - Stroke width
+   - Stroke color
+   - Fill color
+6. Display a live editable symbol preview.
+7. Generate a symbol data model with custom properties.
+
+Technology Used:
+- Python
+- Streamlit (UI)
+- OpenCV (image processing)
+- NumPy
+- Pillow
+
+How to Run the Project:
+1. Install dependencies:
+   pip install streamlit opencv-python numpy pillow
+
+2. Run the application:
+   streamlit run app.py
+
+3. Open browser at:
+   http://localhost:8501
+
+Deployment:
+The project can be deployed using Streamlit Cloud and shared as a public URL.
+
+Use Case:
+The system is useful for symbol creation in design tools, diagram editors, P&ID symbols, and reusable graphic assets.
+
+Conclusion:
+This project demonstrates how AI-based contour processing can transform raw shapes into clean, editable symbols with user-controlled properties.
