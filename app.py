@@ -4,178 +4,110 @@ import numpy as np
 from PIL import Image
 import uuid
 
-# -------------------------------------------------
-# Streamlit Page Config
-# -------------------------------------------------
-st.set_page_config(
-    page_title="AI Shape → Editable Symbol Converter",
-    layout="wide"
-)
-
-st.title("🧠 AI Shape → Editable Symbol Converter (Stroke + Fill)")
+st.set_page_config(page_title="Shape → Editable Symbol", layout="wide")
+st.title("🧠 Shape → Editable Symbol (Correct Fill + Stroke)")
 
 # -------------------------------------------------
-# Extract Freeform Contour
+# Extract shape mask & stroke edges
 # -------------------------------------------------
-def extract_contour(image):
+def extract_shape_and_edges(image):
     img = np.array(image)
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    edges = cv2.Canny(gray, 50, 150)
 
-    contours, _ = cv2.findContours(
-        edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+
+    # ---- FILL MASK ----
+    _, fill_mask = cv2.threshold(
+        gray, 240, 255, cv2.THRESH_BINARY_INV
     )
 
-    if not contours:
-        return None, edges
+    kernel = np.ones((7, 7), np.uint8)
+    fill_mask = cv2.morphologyEx(fill_mask, cv2.MORPH_CLOSE, kernel)
 
-    largest = max(contours, key=cv2.contourArea)
-    return largest, edges
+    # ---- STROKE EDGES ----
+    edges = cv2.Canny(gray, 50, 150)
+
+    return fill_mask, edges
 
 # -------------------------------------------------
-# Render Symbol with FILL + STROKE
+# Render symbol
 # -------------------------------------------------
 def render_symbol(
-    contour,
+    fill_mask,
+    edges,
     scale_x,
     scale_y,
     stroke_width,
     stroke_color,
     fill_color
 ):
-    canvas = np.ones((600, 800, 3), dtype=np.uint8) * 255
-    contour = contour.astype(np.float32)
+    h, w = 600, 800
+    canvas = np.ones((h, w, 3), dtype=np.uint8) * 255
 
-    # Normalize contour to origin
-    contour -= contour.min(axis=0)
+    # HEX → BGR
+    stroke_bgr = tuple(int(stroke_color[i:i+2], 16) for i in (5, 3, 1))
+    fill_bgr   = tuple(int(fill_color[i:i+2], 16) for i in (5, 3, 1))
 
-    # Apply scaling
-    contour[:, 0, 0] *= scale_x
-    contour[:, 0, 1] *= scale_y
-
-    # Center on canvas
-    contour[:, 0, 0] += 100
-    contour[:, 0, 1] += 100
-
-    contour_i = contour.astype(np.int32)
-
-    # Convert colors HEX → BGR
-    stroke_rgb = tuple(int(stroke_color[i:i+2], 16) for i in (1, 3, 5))
-    fill_rgb = tuple(int(fill_color[i:i+2], 16) for i in (1, 3, 5))
-
-    stroke_bgr = stroke_rgb[::-1]
-    fill_bgr = fill_rgb[::-1]
-
-    # ---- FILL INSIDE SHAPE ----
-    cv2.drawContours(
-        canvas,
-        [contour_i],
-        -1,
-        fill_bgr,
-        thickness=-1
+    # ---- FIND CONTOUR FOR FILL ----
+    contours, _ = cv2.findContours(
+        fill_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
     )
+    cnt = max(contours, key=cv2.contourArea).astype(np.float32)
 
-    # ---- DRAW STROKE OUTLINE ----
-    cv2.drawContours(
-        canvas,
-        [contour_i],
-        -1,
-        stroke_bgr,
-        thickness=int(stroke_width)
-    )
+    min_x, min_y = cnt.min(axis=(0, 1))
+    cnt[:, 0, 0] = (cnt[:, 0, 0] - min_x) * scale_x + 150
+    cnt[:, 0, 1] = (cnt[:, 0, 1] - min_y) * scale_y + 100
+    cnt = cnt.astype(np.int32)
+
+    # ---- FILL ----
+    cv2.drawContours(canvas, [cnt], -1, fill_bgr, -1)
+
+    # ---- STROKE (EDGE BASED) ----
+    edge_points = np.column_stack(np.where(edges > 0))
+
+    for y, x in edge_points:
+        sx = int((x - min_x) * scale_x + 150)
+        sy = int((y - min_y) * scale_y + 100)
+        if 0 <= sx < w and 0 <= sy < h:
+            cv2.circle(canvas, (sx, sy), stroke_width, stroke_bgr, -1)
 
     return canvas
 
 # -------------------------------------------------
-# Streamlit UI
+# UI
 # -------------------------------------------------
-uploaded_file = st.file_uploader(
-    "📤 Upload Shape Image (PNG / JPG)",
-    type=["png", "jpg", "jpeg"]
-)
+uploaded_file = st.file_uploader("Upload image", ["png", "jpg", "jpeg"])
 
 if uploaded_file:
-    image = Image.open(uploaded_file)
+    image = Image.open(uploaded_file).convert("RGB")
 
     col1, col2 = st.columns(2)
-
     with col1:
-        st.subheader("Original Image")
         st.image(image, use_column_width=True)
 
-    contour, edges = extract_contour(image)
+    fill_mask, edges = extract_shape_and_edges(image)
 
     with col2:
-        st.subheader("Edge Detection")
-        st.image(edges, use_column_width=True)
+        st.image(fill_mask, caption="Fill Mask", clamp=True)
 
-    if contour is not None:
-        st.success("Detected Shape Type: Freeform")
+    st.subheader("Edit Symbol")
 
-        # -------------------------
-        # Editing Controls
-        # -------------------------
-        st.subheader("✏️ Edit Symbol")
+    scale_x = st.slider("Scale X", 0.5, 3.0, 1.0)
+    scale_y = st.slider("Scale Y", 0.5, 3.0, 1.0)
+    stroke_width = st.slider("Stroke Width", 1, 6, 2)
 
-        scale_x = st.slider(
-            "Width (Scale X)",
-            0.5, 3.0, 1.0
-        )
+    stroke_color = st.color_picker("Stroke Color", "#b44cff")
+    fill_color = st.color_picker("Fill Color", "#ff0000")
 
-        scale_y = st.slider(
-            "Height (Scale Y)",
-            0.5, 3.0, 1.0
-        )
+    preview = render_symbol(
+        fill_mask,
+        edges,
+        scale_x,
+        scale_y,
+        stroke_width,
+        stroke_color,
+        fill_color
+    )
 
-        stroke_width = st.slider(
-            "Stroke Width",
-            1, 10, 2
-        )
-
-        stroke_color = st.color_picker(
-            "Stroke Color (Outline)",
-            "#000000"
-        )
-
-        fill_color = st.color_picker(
-            "Fill Color (Inside Symbol)",
-            "#FFFFFF"
-        )
-
-        # -------------------------
-        # Render Preview
-        # -------------------------
-        preview = render_symbol(
-            contour,
-            scale_x,
-            scale_y,
-            stroke_width,
-            stroke_color,
-            fill_color
-        )
-
-        st.subheader("🧩 Editable Symbol Preview")
-        st.image(preview, use_column_width=True)
-
-        # -------------------------
-        # Symbol Data Model
-        # -------------------------
-        symbol = {
-            "symbol_id": "sym_" + uuid.uuid4().hex[:6],
-            "symbol_type": "Freeform",
-            "parameters": {
-                "scale_x": float(scale_x),
-                "scale_y": float(scale_y)
-            },
-            "properties": {
-                "strokeWidth": int(stroke_width),
-                "strokeColor": stroke_color,
-                "fillColor": fill_color
-            }
-        }
-
-        st.subheader("📦 Symbol Data Model")
-        st.json(symbol)
-
-    else:
-        st.error("No shape detected. Please upload a clear shape image.")
+    st.image(cv2.cvtColor(preview, cv2.COLOR_BGR2RGB),
+             caption="Editable Symbol",
+             use_column_width=True)
